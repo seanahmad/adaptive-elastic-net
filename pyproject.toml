@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "adaptive-enet"
+version = "0.0.0"
+description = ""
+authors = ["Shota Imaki <shota.imaki@icloud.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+scikit-learn = "^0.24.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py37']
+include = '\.pyi?$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+  )/
+)
+'''
+[tool.isort]
+profile = 'black'
+force_single_line = true
