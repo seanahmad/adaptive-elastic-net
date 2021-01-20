@@ -7,6 +7,7 @@ from sklearn.base import MultiOutputMixin
 from sklearn.base import RegressorMixin
 from sklearn.linear_model import ElasticNet
 from sklearn.linear_model._base import LinearModel
+from sklearn.linear_model._coordinate_descent import _alpha_grid
 from sklearn.utils import check_X_y
 from sklearn.utils.validation import check_is_fitted
 
@@ -15,9 +16,9 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     """
     Objective function is
 
-        (1 / 2 n_samples) sum_i ||y_i - y_pred_i||^2
+        (1 / 2 n_samples) * sum_i ||y_i - y_pred_i||^2
             + alpha * l1ratio * sum_j |coef_j|
-            + alpha * (1 - l1ratio) * sum_j w_j ||coef_j||^2
+            + alpha * (1 - l1ratio) * sum_j w_j * ||coef_j||^2
 
         w_j = |b_j| ** (-gamma)
         b_j = coefs obtained by fitting ordinary elastic net
@@ -29,48 +30,76 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
     Parameters
     ----------
-    - alpha
-    - l1_ratio
+    - alpha : float, default=1.0
+        Constant that multiplies the penalty terms.
+    - l1_ratio : float, default=0.5
+        float between 0 and 1 passed to ElasticNet (scaling between l1 and l2 penalties).
+    - gamma : float > 0, default=1.0
+        To guarantee the oracle property, following inequality should be satisfied:
+            gamma > 2 * nu / (1 - nu)
+            nu = lim(n_samples -> inf) [log(n_features) / log(n_samples)]
+        default is 1 because this value is natural in the sense that l1_penalty/l2_penalty
+        is not (directly) dependent on scale of features
     - fit_intercept = True
-    - gamma
-        TODO sensible default value
 
     Examples
     --------
-    >>> np.random.seed(42)
+    >>> from sklearn.datasets import make_regression
 
-    >>> X = np.random.randn(100, 3)
-    >>> y = X[:, 0] + 2 * X[:, 1] + 3
-
-    >>> model = AdaptiveElasticNet().fit(X, y)
-    >>> model.coef_
-    array([0.        , 0.89455341, 0.        ])
-    >>> model.intercept_
-    2.864154065031719
-
-    >>> X = np.random.randn(5, 3)
-    >>> X[:, 0] + 2 * X[:, 1] + 3
-    array([3.56237162, 3.4575266 , 0.43723578, 5.59999799, 3.71857286])
-    >>> model.predict(X)
-    array([4.10719537, 2.31378436, 1.49776611, 3.54802068, 3.57138261])
+    >>> X, y = make_regression(n_features=2, random_state=0)
+    >>> model = AdaptiveElasticNet()
+    >>> model.fit(X, y)
+    AdaptiveElasticNet(solver='default', tol=1e-05)
+    >>> print(model.coef_)
+    [14.24414426 48.9550584 ]
+    >>> print(model.intercept_)
+    2.092...
+    >>> print(model.predict([[0, 0]]))
+    [2.092...]
     """
 
-    def __init__(self, alpha=1.0, *, l1_ratio=0.5, fit_intercept=True, gamma=1.0,eps=1e-5):
+    def __init__(
+        self,
+        alpha=1.0,
+        *,
+        l1_ratio=0.5,
+        gamma=1.0,
+        fit_intercept=True,
+        normalize=False,
+        precompute=False,
+        copy_X=True,
+        eps=1e-3,
+        solver=None,
+        tol=None,
+    ):
+        params_asgl = dict(model="lm", penalization="asgl")
+        if solver is not None:
+            params_asgl["solver"] = solver
+        if tol is not None:
+            params_asgl["tol"] = tol
+
+        super().__init__(**params_asgl)
+
         self.alpha = alpha
         self.l1_ratio = l1_ratio
-        self.fit_intercept = fit_intercept
         self.gamma = gamma
+        self.fit_intercept = fit_intercept
+        self.normalize = normalize
+        self.precompute = precompute
+        self.copy_X = copy_X
         self.eps = eps
 
-        # TODO random_state
+        if not self.fit_intercept:
+            raise NotImplementedError
 
-        self.model = "lm"
-        self.solver = "default"
-        self.tol = 1e-5
-        assert self.fit_intercept
+        # TODO(simki) guarantee reproducibility.  is cvxpy reproducible?
 
     def fit(self, X, y):
         self.coef_, self.intercept_ = self._ae(X, y)
+
+        self.dual_gap_ = np.array([np.nan])
+        self.n_iter_ = 1
+
         return self
 
     def predict(self, X):
@@ -96,8 +125,8 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
         if self.fit_intercept:
             beta_variables = [cvxpy.Variable(1)] + beta_variables
-            _1 = cvxpy.Constant(np.ones((n_samples, 1)))
-            model_prediction += _1 @ beta_variables[0]
+            ones = cvxpy.Constant(np.ones((n_samples, 1)))
+            model_prediction += ones @ beta_variables[0]
 
         # --- define objective function ---
         #   l1 weights w_i are identified with coefs in usual elastic net
@@ -159,3 +188,64 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         weights = 1 / (abscoef ** self.gamma)
 
         return weights
+
+    @classmethod
+    def aenet_path(
+        cls,
+        X,
+        y,
+        *,
+        l1_ratio=0.5,
+        eps=1e-3,
+        n_alphas=100,
+        alphas=None,
+        precompute="auto",
+        Xy=None,
+        copy_X=True,
+        coef_init=None,
+        verbose=False,
+        return_n_iter=False,
+        positive=False,
+        check_input=True,
+        **params,
+    ):
+        """
+        Return regression results for multiple alphas
+
+        see enet_path in sklearn
+
+        Returns
+        -------
+        (alphas, coefs, dual_gaps)
+        """
+
+        # TODO if none
+        alphas = _alpha_grid(
+            X,
+            y,
+            Xy=Xy,
+            l1_ratio=l1_ratio,
+            fit_intercept=False,
+            eps=eps,
+            n_alphas=n_alphas,
+            normalize=False,
+            copy_X=False,
+        )
+
+        n_samples, n_features = X.shape
+
+        dual_gaps = np.empty(n_alphas)
+        n_iters = []
+        coefs = np.empty((n_features, n_alphas), dtype=X.dtype)
+        coef_ = np.zeros(coefs.shape[:-1], dtype=X.dtype, order="F")
+        for i, alpha in enumerate(alphas):
+            model = cls(alpha=alpha)
+            model.fit(X, y)
+
+            coef_ = model.coef_
+
+            coefs[..., i] = coef_
+            dual_gaps[i] = np.nan
+            n_iters.append(1)
+
+        return (alphas, coefs, dual_gaps)
