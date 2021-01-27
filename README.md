@@ -26,7 +26,7 @@ model.score(X)
 
 See docstring for details.
 
-```
+```py
 # On Jupyter notebook
 AdaptiveElasticNet?
 AdaptiveElasticNetCV?
