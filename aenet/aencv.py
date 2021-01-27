@@ -59,17 +59,6 @@ class AdaptiveElasticNetCV(RegressorMixin, LinearModelCV):
         # selection="cyclic",
         eps=1e-3,
     ):
-        # --- initialize ---
-        # l1 float ok
-        # cv int ok
-        # eps ???
-        # positive ??? important
-        # max_iter cvx ni aru
-        # precompute optional
-        # jobs optional
-        # positive  see elasticnet
-        # ElasticNetCV(l1_ratio=l1, cv=self.cv, positive=True,
-        # eps=0.003, max_iter=100000, precompute=True, n_jobs=3)
         super().__init__(
             n_alphas=n_alphas,
             alphas=alphas,
