@@ -47,6 +47,14 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         The maximum number of iterations.
     - positive : bool, default=False
         When set to `True`, forces the coefficients to be positive.
+    - positive_tol : float, optional
+        Numerical optimization (cvxpy) may return slightly negative coefs.
+        (See cvxpy issue/#1201)
+        If coef > -positive_tol, ignore this and forcively set negative coef to zero.
+        Otherwise, raise ValueError.
+        If `positive_tol=None` always ignore (default)
+    - eps_coef : float, default 1e-6
+        Small constant to prevent zero division in b_j ** (-gamma).
 
     Examples
     --------
@@ -65,10 +73,10 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
     Constraint:
     >>> X, y = make_regression(n_features=10, random_state=0)
-    >>> y = -1e-4 * y
-    >>> model = AdaptiveElasticNet(positive=True).fit(X, y)
+    >>> model = AdaptiveElasticNet(positive=True).fit(X, -y)
     >>> model.coef_
-    array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+    array([0.        , 0.        , 0.        , 0.        , 0.        ,
+           0.        , 0.        , 0.        , 7.64625292, 0.        ])
     """
 
     def __init__(
@@ -81,10 +89,11 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         max_iter=10000,
         precompute=False,
         copy_X=True,
-        eps=1e-3,
         solver=None,
         tol=None,
         positive=False,
+        positive_tol=1e-3,
+        eps_coef=1e-6,
     ):
         params_asgl = dict(model="lm", penalization="asgl")
         if solver is not None:
@@ -101,9 +110,9 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         self.max_iter = max_iter
         self.precompute = precompute
         self.copy_X = copy_X
-        self.eps = eps
         self.positive = positive
-        self.positive_tol = 1e-3
+        self.positive_tol = positive_tol
+        self.eps_coef = eps_coef
 
         if not self.fit_intercept:
             raise NotImplementedError
@@ -207,11 +216,10 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         intercept, coef = beta_sol[0], beta_sol[1:]
 
         # Check if constraint violation is less than positive_tol. cf cvxpy issue/#1201
-        if self.positive:
-            if all(constraint.value(self.positive_tol) for constraint in constraints):
-                coef = np.maximum(coef, 0)
-            else:
+        if self.positive and self.positive_tol is not None:
+            if not all(c.value(self.positive_tol) for c in constraints):
                 raise ValueError(f"positive_tol is violated. coef is:\n{coef}")
+        coef = np.maximum(coef, 0)
 
         self.solver_stats = problem.solver_stats
 
@@ -227,7 +235,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         -------
         weights : np.array, shape (n_features,)
         """
-        abscoef = np.maximum(np.abs(ElasticNet().fit(X, y).coef_), self.eps)
+        abscoef = np.maximum(np.abs(ElasticNet().fit(X, y).coef_), self.eps_coef)
         weights = 1 / (abscoef ** self.gamma)
 
         return weights
