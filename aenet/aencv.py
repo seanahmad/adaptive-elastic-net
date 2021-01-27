@@ -1,10 +1,7 @@
-import numpy as np
 from sklearn.base import RegressorMixin
 from sklearn.linear_model._coordinate_descent import LinearModelCV
 
 from .aen import AdaptiveElasticNet
-
-# from .aen import aenet_path
 
 
 class AdaptiveElasticNetCV(RegressorMixin, LinearModelCV):
@@ -62,6 +59,17 @@ class AdaptiveElasticNetCV(RegressorMixin, LinearModelCV):
         # selection="cyclic",
         eps=1e-3,
     ):
+        # --- initialize ---
+        # l1 float ok
+        # cv int ok
+        # eps ???
+        # positive ??? important
+        # max_iter cvx ni aru
+        # precompute optional
+        # jobs optional
+        # positive  see elasticnet
+        # ElasticNetCV(l1_ratio=l1, cv=self.cv, positive=True,
+        # eps=0.003, max_iter=100000, precompute=True, n_jobs=3)
         super().__init__(
             n_alphas=n_alphas,
             alphas=alphas,
@@ -73,13 +81,15 @@ class AdaptiveElasticNetCV(RegressorMixin, LinearModelCV):
             # selection=selection,
         )
 
-        # TODO reflect them to cls()
         self.l1_ratio = l1_ratio
         self.gamma = gamma
         self.eps = eps
 
     def _get_estimator(self):
-        return AdaptiveElasticNet(l1_ratio=self.l1_ratio,gamma=self.gamma,eps=self.eps)
+        # TODO check that these values are reflected in cv
+        return AdaptiveElasticNet(
+            l1_ratio=self.l1_ratio, gamma=self.gamma, eps=self.eps
+        )
 
     def _is_multitask(self):
         return False
