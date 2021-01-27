@@ -1,13 +1,11 @@
 import logging
 
 import cvxpy
-from cvxpy.constraints import NonNeg
 import numpy as np
 from asgl import ASGL
 from sklearn.base import MultiOutputMixin
 from sklearn.base import RegressorMixin
 from sklearn.linear_model import ElasticNet
-from sklearn.linear_model._base import LinearModel
 from sklearn.linear_model._coordinate_descent import _alpha_grid
 from sklearn.utils import check_X_y
 from sklearn.utils.validation import check_is_fitted
@@ -34,13 +32,14 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     - alpha : float, default=1.0
         Constant that multiplies the penalty terms.
     - l1_ratio : float, default=0.5
-        float between 0 and 1 passed to ElasticNet (scaling between l1 and l2 penalties).
+        float between 0 and 1 passed to ElasticNet
+        (scaling between l1 and l2 penalties).
     - gamma : float > 0, default=1.0
         To guarantee the oracle property, following inequality should be satisfied:
             gamma > 2 * nu / (1 - nu)
             nu = lim(n_samples -> inf) [log(n_features) / log(n_samples)]
-        default is 1 because this value is natural in the sense that l1_penalty / l2_penalty
-        is not (directly) dependent on scale of features
+        default is 1 because this value is natural in the sense that
+        l1_penalty / l2_penalty is not (directly) dependent on scale of features
     - fit_intercept = True
     - positive : bool, default=False
         When set to `True`, forces the coefficients to be positive.
@@ -49,26 +48,23 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     --------
     >>> from sklearn.datasets import make_regression
 
-    # >>> X, y = make_regression(n_features=2, random_state=0)
-    # >>> model = AdaptiveElasticNet()
-    # >>> model.fit(X, y)
-    # AdaptiveElasticNet(solver='default', tol=1e-05)
-    # >>> print(model.coef_)
-    # [14.24414426 48.9550584 ]
-    # >>> print(model.intercept_)
-    # 2.092...
-    # >>> print(model.predict([[0, 0]]))
-    # [2.092...]
-
-    Constraint:
-    >>> X, y = make_regression(n_features=10, random_state=0)
-    >>> model = AdaptiveElasticNet(positive=True).fit(X, -y)
+    >>> X, y = make_regression(n_features=2, random_state=0)
+    >>> model = AdaptiveElasticNet()
+    >>> model.fit(X, y)
+    AdaptiveElasticNet(solver='default', tol=1e-05)
     >>> print(model.coef_)
     [14.24414426 48.9550584 ]
     >>> print(model.intercept_)
     2.092...
     >>> print(model.predict([[0, 0]]))
     [2.092...]
+
+    Constraint:
+    >>> X, y = make_regression(n_features=10, random_state=0)
+    >>> y = -1e-4 * y
+    >>> model = AdaptiveElasticNet(positive=True).fit(X, y)
+    >>> model.coef_
+    array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
     """
 
     def __init__(
@@ -110,7 +106,20 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
         # TODO(simaki) guarantee reproducibility.  is cvxpy reproducible?
 
-    def fit(self, X, y):
+    def fit(self, X, y, check_input=True):
+        if check_input:
+            X_copied = self.copy_X and self.fit_intercept
+            X, y = self._validate_data(
+                X,
+                y,
+                accept_sparse="csc",
+                order="F",
+                dtype=[np.float64, np.float32],
+                copy=X_copied,
+                multi_output=True,
+                y_numeric=True,
+            )
+
         self.coef_, self.intercept_ = self._ae(X, y)
 
         self.dual_gap_ = np.array([np.nan])
@@ -119,6 +128,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         return self
 
     def predict(self, X):
+        check_is_fitted(self, ["coef_", "intercept_"])
         return super(ElasticNet, self).predict(X)
 
     def _ae(self, X, y) -> (np.array, float):
@@ -134,7 +144,6 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         check_X_y(X, y)
 
         n_samples, n_features = X.shape
-        group_index = np.ones(n_features)
         beta_variables = [cvxpy.Variable(n_features)]
         # _, beta_variables = self._num_beta_var_from_group_index(group_index)
         # beta_variables = cvxpy.Variable()
@@ -154,7 +163,8 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         model_prediction += X @ beta_variables[1]
         error = cvxpy.sum_squares(y - model_prediction) / (2 * n_samples)
 
-        # XXX: we, paper by Zou Zhang and sklearn use norm squared for l2_penalty whereas asgl uses norm itself
+        # XXX: we, paper by Zou Zhang and sklearn use norm squared for l2_penalty
+        # whereas asgl uses norm itself
         l1_coefs = self.alpha * self.l1_ratio * self._weights_from_elasticnet(X, y)
         l2_coefs = self.alpha * (1 - self.l1_ratio) * 1.0
         l1_penalty = cvxpy.Constant(l1_coefs) @ cvxpy.abs(beta_variables[1])
@@ -163,7 +173,9 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         constraints = [b >= 0 for b in beta_variables] if self.positive else []
 
         # --- optimization ---
-        problem = cvxpy.Problem(cvxpy.Minimize(error + l1_penalty + l2_penalty), constraints=constraints)
+        problem = cvxpy.Problem(
+            cvxpy.Minimize(error + l1_penalty + l2_penalty), constraints=constraints
+        )
         try:
             if self.solver == "default":
                 problem.solve(warm_start=True)
@@ -184,7 +196,6 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
                         break
                 except (ValueError, cvxpy.error.SolverError):
                     continue
-
 
         self.solver_stats = problem.solver_stats
         if problem.status in ["infeasible", "unbounded"]:
