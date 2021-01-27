@@ -38,3 +38,8 @@ See docstring for details.
 AdaptiveElasticNet?
 AdaptiveElasticNetCV?
 ```
+
+## Reference
+
+*  Zou, H. and Zhang, H. H. (2009). [On the adaptive elastic net with a diverging number of parameters](https://dx.doi.org/10.1214%2F08-AOS625). Annals
+of Statistics 37, 1733-1751.
