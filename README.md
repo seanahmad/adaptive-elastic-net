@@ -23,3 +23,11 @@ model.alpha_
 model.predict(X)
 model.score(X)
 ```
+
+See docstring for details.
+
+```
+# On Jupyter notebook
+AdaptiveElasticNet?
+AdaptiveElasticNetCV?
+```
