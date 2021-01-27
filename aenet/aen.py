@@ -1,3 +1,6 @@
+import logging
+import numbers
+import warnings
 import cvxpy
 import numpy as np
 from asgl import ASGL
@@ -108,6 +111,19 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         # TODO(simaki) guarantee reproducibility.  is cvxpy reproducible?
 
     def fit(self, X, y, check_input=True):
+        if self.alpha == 0:
+            warnings.warn(
+                "With alpha=0, this algorithm does not converge "
+                "well. You are advised to use the LinearRegression "
+                "estimator",
+                stacklevel=2,
+            )
+
+        if not isinstance(self.l1_ratio, numbers.Number) or not 0 <= self.l1_ratio <= 1:
+            raise ValueError(
+                "l1_ratio must be between 0 and 1; " f"got l1_ratio={self.l1_ratio}"
+            )
+
         if check_input:
             X_copied = self.copy_X and self.fit_intercept
             X, y = self._validate_data(
