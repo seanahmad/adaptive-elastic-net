@@ -1,10 +1,9 @@
-import logging
-
 import cvxpy
 import numpy as np
 from asgl import ASGL
 from sklearn.base import MultiOutputMixin
 from sklearn.base import RegressorMixin
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import ElasticNet
 from sklearn.linear_model._coordinate_descent import _alpha_grid
 from sklearn.utils import check_X_y
@@ -41,6 +40,8 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         default is 1 because this value is natural in the sense that
         l1_penalty / l2_penalty is not (directly) dependent on scale of features
     - fit_intercept = True
+    - max_iter : int, default 10000
+        The maximum number of iterations.
     - positive : bool, default=False
         When set to `True`, forces the coefficients to be positive.
 
@@ -74,7 +75,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         l1_ratio=0.5,
         gamma=1.0,
         fit_intercept=True,
-        normalize=False,
+        max_iter=10000,
         precompute=False,
         copy_X=True,
         eps=1e-3,
@@ -94,12 +95,12 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         self.l1_ratio = l1_ratio
         self.gamma = gamma
         self.fit_intercept = fit_intercept
-        self.normalize = normalize
+        self.max_iter = max_iter
         self.precompute = precompute
         self.copy_X = copy_X
         self.eps = eps
         self.positive = positive
-        self.positive_tol = 1e-8
+        self.positive_tol = 1e-3
 
         if not self.fit_intercept:
             raise NotImplementedError
@@ -176,30 +177,14 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         problem = cvxpy.Problem(
             cvxpy.Minimize(error + l1_penalty + l2_penalty), constraints=constraints
         )
-        try:
-            if self.solver == "default":
-                problem.solve(warm_start=True)
-            else:
-                solver_dict = self._cvxpy_solver_options(solver=self.solver)
-                problem.solve(**solver_dict)
-        except (ValueError, cvxpy.error.SolverError):
-            logging.warning(
-                "Default solver failed. Using alternative options. "
-                "Check solver and solver_stats for more details"
-            )
-            solver = ["ECOS", "OSQP", "SCS"]
-            for elt in solver:
-                solver_dict = self._cvxpy_solver_options(solver=elt)
-                try:
-                    problem.solve(**solver_dict)
-                    if "optimal" in problem.status:
-                        break
-                except (ValueError, cvxpy.error.SolverError):
-                    continue
+        # OSQP seems to be default for our problem.
+        problem.solve(solver="OSQP", max_iter=self.max_iter)
 
-        self.solver_stats = problem.solver_stats
-        if problem.status in ["infeasible", "unbounded"]:
-            logging.warning("Optimization problem status failure")
+        if problem.status != "optimal":
+            raise ConvergenceWarning(
+                f"Solver did not reach optimum (Status: {problem.status})"
+            )
+
         beta_sol = np.concatenate([b.value for b in beta_variables], axis=0)
         beta_sol[np.abs(beta_sol) < self.tol] = 0
 
@@ -211,6 +196,8 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
                 coef = np.maximum(coef, 0)
             else:
                 raise ValueError(f"positive_tol is violated. coef is:\n{coef}")
+
+        self.solver_stats = problem.solver_stats
 
         return (coef, intercept)
 
@@ -269,7 +256,6 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
                 fit_intercept=False,
                 eps=eps,
                 n_alphas=n_alphas,
-                normalize=False,
                 copy_X=False,
             )
 
