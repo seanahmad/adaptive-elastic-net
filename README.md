@@ -23,12 +23,12 @@ X, y = ...
 
 model = AdaptiveElasticNet().fit(X, y)
 model.predict(X)
-model.score(X)
+model.score(X, y)
 
 model = AdaptiveElasticNetCV().fit(X, y)
 model.alpha_
 model.predict(X)
-model.score(X)
+model.score(X, y)
 ```
 
 ## Reference
