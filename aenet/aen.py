@@ -1,6 +1,6 @@
-import logging
 import numbers
 import warnings
+
 import cvxpy
 import numpy as np
 from asgl import ASGL
