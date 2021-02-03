@@ -68,11 +68,15 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     >>> from sklearn.datasets import make_regression
 
     >>> X, y = make_regression(n_features=2, random_state=0)
-    >>> model = AdaptiveElasticNet()
+    >>> model = AdaptiveElasticNet(random_state=42)
     >>> model.fit(X, y)
-    AdaptiveElasticNet(solver='default', tol=1e-05)
+    AdaptiveElasticNet(random_state=42, solver='default', tol=1e-05)
     >>> print(model.coef_)
     [14.24414426 48.9550584 ]
+    >>> print(model.enet_coef_)
+    [18.8... 64.5...]
+    >>> print(model.weights_)
+    [0.0530... 0.0154...]
     >>> print(model.intercept_)
     2.092...
     >>> print(model.predict([[0, 0]]))
@@ -82,8 +86,8 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     >>> X, y = make_regression(n_features=10, random_state=0)
     >>> model = AdaptiveElasticNet(positive=True).fit(X, -y)
     >>> model.coef_
-    array([0.        , 0.        , 0.        , 0.        , 0.        ,
-           0.        , 0.        , 0.        , 7.64625292, 0.        ])
+    array([ 0.        ,  0.        ,  0.        ,  0.        ,  0.        ,
+            0.        ,  0.        ,  0.        , 13.39621927,  0.        ])
     """
 
     def __init__(
@@ -93,13 +97,14 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         l1_ratio=0.5,
         gamma=1.0,
         fit_intercept=True,
-        max_iter=10000,
         precompute=False,
+        max_iter=10000,
         copy_X=True,
         solver=None,
         tol=None,
         positive=False,
         positive_tol=1e-3,
+        random_state=None,
         eps_coef=1e-6,
     ):
         params_asgl = dict(model="lm", penalization="asgl")
@@ -119,6 +124,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         self.copy_X = copy_X
         self.positive = positive
         self.positive_tol = positive_tol
+        self.random_state = random_state
         self.eps_coef = eps_coef
 
         if not self.fit_intercept:
@@ -164,6 +170,32 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         check_is_fitted(self, ["coef_", "intercept_"])
         return super(ElasticNet, self).predict(X)
 
+    def elastic_net(self, **params):
+        """
+        ElasticNet with the same parameters of self.
+
+        Parameters
+        ----------
+        - **params
+            Overwrite parameters.
+
+        Returns
+        -------
+        elastic_net : ElasticNet
+        """
+        elastic_net = ElasticNet()
+
+        for k, v in self.get_params().items():
+            try:
+                elastic_net = elastic_net.set_params(**{k: v})
+            except ValueError:
+                # ElasticNet does not expect parameter `gamma`
+                pass
+
+        elastic_net = elastic_net.set_params(**params)
+
+        return elastic_net
+
     def _ae(self, X, y) -> (np.array, float):
         """
         Adaptive elastic-net counterpart of ASGL.asgl
@@ -198,7 +230,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         model_prediction += X @ beta_variables[1]
         error = cvxpy.sum_squares(y - model_prediction) / (2 * n_samples)
 
-        enet_coef = ElasticNet().fit(X, y).coef_
+        enet_coef = self.elastic_net().fit(X, y).coef_
         weights = 1.0 / (np.maximum(np.abs(enet_coef), self.eps_coef) ** self.gamma)
 
         # XXX: we, paper by Zou Zhang and sklearn use norm squared for l2_penalty
