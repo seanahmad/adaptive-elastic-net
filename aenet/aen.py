@@ -56,6 +56,13 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
     - eps_coef : float, default 1e-6
         Small constant to prevent zero division in b_j ** (-gamma).
 
+    Attributes
+    ----------
+    - coef_
+    - intercept_
+    - enet_coef_
+    - weights_
+
     Examples
     --------
     >>> from sklearn.datasets import make_regression
@@ -146,7 +153,7 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
                 y_numeric=True,
             )
 
-        self.coef_, self.intercept_ = self._ae(X, y)
+        self.coef_, self.intercept_, self.enet_coef_, self.weights_ = self._ae(X, y)
 
         self.dual_gap_ = np.array([np.nan])
         self.n_iter_ = 1
@@ -163,9 +170,11 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
         Returns
         -------
-        (coef, intercept)
-            - coef : np.array, shape(n_features,)
+        (coef, intercept, enet_coef, weights)
+            - coef : np.array, shape (n_features,)
             - intercept : float
+            - enet_coef : np.array, shape (n_features,)
+            - weights : np.array, shape (n_features,)
         """
         check_X_y(X, y)
 
@@ -189,9 +198,12 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
         model_prediction += X @ beta_variables[1]
         error = cvxpy.sum_squares(y - model_prediction) / (2 * n_samples)
 
+        enet_coef = ElasticNet().fit(X, y).coef_
+        weights = 1.0 / (np.maximum(np.abs(enet_coef), self.eps_coef) ** self.gamma)
+
         # XXX: we, paper by Zou Zhang and sklearn use norm squared for l2_penalty
         # whereas asgl uses norm itself
-        l1_coefs = self.alpha * self.l1_ratio * self._weights_from_elasticnet(X, y)
+        l1_coefs = self.alpha * self.l1_ratio * weights
         l2_coefs = self.alpha * (1 - self.l1_ratio) * 1.0
         l1_penalty = cvxpy.Constant(l1_coefs) @ cvxpy.abs(beta_variables[1])
         l2_penalty = cvxpy.Constant(l2_coefs) * cvxpy.sum_squares(beta_variables[1])
@@ -223,22 +235,22 @@ class AdaptiveElasticNet(ASGL, ElasticNet, MultiOutputMixin, RegressorMixin):
 
         self.solver_stats = problem.solver_stats
 
-        return (coef, intercept)
+        return (coef, intercept, enet_coef, weights)
 
-    def _weights_from_elasticnet(self, X, y) -> np.array:
-        """
-        Determine weighs by fitting ElasticNet
+    # def _weights_from_elasticnet(self, X, y) -> np.array:
+    #     """
+    #     Determine weighs by fitting ElasticNet
 
-        wj of (2.1) in Zou-Zhang 2009
+    #     wj of (2.1) in Zou-Zhang 2009
 
-        Returns
-        -------
-        weights : np.array, shape (n_features,)
-        """
-        abscoef = np.maximum(np.abs(ElasticNet().fit(X, y).coef_), self.eps_coef)
-        weights = 1 / (abscoef ** self.gamma)
+    #     Returns
+    #     -------
+    #     weights : np.array, shape (n_features,)
+    #     """
+    #     abscoef = np.maximum(np.abs(ElasticNet().fit(X, y).coef_), self.eps_coef)
+    #     weights = 1 / (abscoef ** self.gamma)
 
-        return weights
+    #     return weights
 
     @classmethod
     def aenet_path(
