@@ -25,7 +25,9 @@ class AdaptiveElasticNetCV(RegressorMixin, LinearModelCV):
         For now False is not allowed
     - cv : int, cross-validation generator or iterable, default=None
         Determines the cross-validation splitting strategy.
-    - eps :
+    - eps : float, default=1e-3
+        Length of the path.
+        eps=1e-3 means that alpha_min / alpha_max = 1e-3.
     - positive : bool, default=False
         When set to True, forces the coefficients to be positive.
     - positive_tol : float, optional
